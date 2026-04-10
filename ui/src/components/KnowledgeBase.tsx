@@ -1,4 +1,5 @@
 ﻿import React, { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTheme } from '../ThemeContext';
 import { KNOWLEDGE_TOPICS, KNOWLEDGE_CATEGORIES, type KnowledgeTopic } from '../data/knowledgeTopics';
 import { KNOWLEDGE_CONTENT, type TopicContent, type CodeExample } from '../data/knowledgeContent';
@@ -6,24 +7,22 @@ import { ArrowLeft, BookOpen, Code2, Lightbulb, Package, ChevronDown, ChevronUp,
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
-interface KnowledgeBaseProps {
-  activeTopic: string;
-  onBack: () => void;
-}
-
-export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ activeTopic, onBack }) => {
+export const KnowledgeBase: React.FC = () => {
+  const { topicId } = useParams<{ topicId: string }>();
+  const navigate = useNavigate();
   const { isDark, t } = useTheme();
-  const topic = KNOWLEDGE_TOPICS.find(tp => tp.id === activeTopic);
-  const content = KNOWLEDGE_CONTENT.find(c => c.id === activeTopic);
+  
+  const topic = KNOWLEDGE_TOPICS.find(tp => tp.id === topicId);
+  const content = KNOWLEDGE_CONTENT.find(c => c.id === topicId);
 
   if (!topic || !content) {
     return (
       <div style={{ padding: '40px 32px', textAlign: 'center' }}>
         <p style={{ color: t.textMuted }}>Topic not found.</p>
-        <button onClick={onBack} style={{
+        <button onClick={() => navigate('/')} style={{
           marginTop: 12, padding: '8px 20px', borderRadius: 10, border: 'none',
           background: t.accent, color: '#fff', fontWeight: 700, cursor: 'pointer',
-        }}>← Back</button>
+        }}>Back to Home</button>
       </div>
     );
   }
@@ -35,7 +34,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ activeTopic, onBac
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '28px 32px 60px' }}>
       {/* Back + Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-        <button onClick={onBack} style={{
+        <button onClick={() => navigate('/')} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
           borderRadius: 10, border: `1px solid ${t.border}`, cursor: 'pointer',
           background: isDark ? 'rgba(68,71,90,0.6)' : 'rgba(255,255,255,0.8)',

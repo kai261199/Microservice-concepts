@@ -653,118 +653,60 @@ return await _db.Orders
   // RABBITMQ
   {
     id: 'rabbitmq',
-    problem: 'Ứng dụng phân tán cần giao tiếp bất đồng bộ, chịu lỗi tốt.',
+    problem: 'OrderService gửi message đến Inventory/Payment. HTTP trực tiếp -> service down mất request, không buffer, coupling chặt.',
     theory: [
-      'Message broker: nhận, lưu trữ, chuyển tiếp message.',
-      'Queue: lưu trữ message chờ xử lý.',
-      'Exchange: nhận message từ producer, chuyển tới queue.',
-      'Binding: liên kết exchange và queue.',
-      'Routing key: xác định đâu là đích đến của message.',
+      'Message Broker: decouple producer/consumer, buffer messages khi consumer offline.',
+      'Exchange -> Binding -> Queue routing. Exchange types: Direct, Fanout, Topic, Headers.',
+      'Queue lưu trữ message chờ consumer. Durable queue survive broker restart.',
+      'ACK mechanism: consumer xử lý xong -> ACK -> broker xóa message. NACK -> requeue hoặc DLQ.',
+      'Prefetch count: giới hạn số message gửi cho consumer cùng lúc, tránh overload.',
+      'Dead Letter Queue (DLQ): message fail sau N retries -> chuyển vào DLQ để xử lý sau.',
     ],
     codeExamples: [
       {
-        title: 'Sử dụng RabbitMQ với MassTransit',
+        title: 'MassTransit + RabbitMQ Setup',
         language: 'csharp',
-        code: `// Producer
-public async Task PlaceOrder(Order order)
+        code: `// DI Registration
+services.AddMassTransit(x =>
 {
-    await _bus.Publish<OrderPlaced>(new {
-        order.Id,
-        order.Total,
-        order.CustomerId
+    x.AddConsumers(typeof(Program).Assembly);
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host("rabbitmq://localhost", h =>
+        {
+            h.Username("guest");
+            h.Password("guest");
+        });
+        cfg.UseMessageRetry(r => r.Intervals(1000, 5000, 15000));
+        cfg.ConfigureEndpoints(context);
     });
-}
+});
+
+// Producer
+await _bus.Publish(new OrderCreatedEvent { OrderId = orderId });
 
 // Consumer
-public class OrderPlacedConsumer : IConsumer<OrderPlaced>
+public class ReserveStockConsumer : IConsumer<OrderCreatedEvent>
 {
-    public async Task Consume(ConsumeContext<OrderPlaced> context)
+    public async Task Consume(ConsumeContext<OrderCreatedEvent> ctx)
     {
-        var orderId = context.Message.Id;
-        // Xử lý đơn hàng mới
+        await ReserveStock(ctx.Message.OrderId);
     }
 }`,
       },
     ],
     libraries: [
-      { name: 'MassTransit', nuget: 'MassTransit', desc: 'RabbitMQ messaging' },
-      { name: 'RabbitMQ.Client', nuget: 'RabbitMQ.Client', desc: 'Official RabbitMQ .NET client' },
+      { name: 'MassTransit.RabbitMQ', nuget: 'MassTransit.RabbitMQ', desc: 'Transport layer cho MassTransit' },
+      { name: 'RabbitMQ.Client', nuget: 'RabbitMQ.Client', desc: 'Low-level official .NET client' },
     ],
     qa: [
-      { question: 'RabbitMQ hoạt động như thế nào?', answer: 'Producer gửi message đến exchange. Exchange nhận message và dựa vào routing key, chuyển đến đúng queue. Consumer lấy message từ queue và xử lý.' },
-      { question: 'Có những loại exchange nào trong RabbitMQ?', answer: 'Direct, fanout, topic, headers. Direct: route đến queue cụ thể. Fanout: broadcast tới tất cả queue. Topic: route dựa trên pattern matching routing key. Headers: route dựa trên header attributes.' },
-      { question: 'RabbitMQ có đảm bảo delivery order không?', answer: 'KHÔNG đảm bảo giữa nhiều consumer. Trong 1 queue, RabbitMQ đảm bảo thứ tự message. Tuy nhiên, nếu cần thứ tự tuyệt đối, nên dùng transactional outbox hoặc thiết kế lại architecture.' },
-      {
-        question: 'Dead letter exchange (DLX) là gì? Khi nào dùng?',
-        answer: 'DLX: nơi nhận message bị từ chối hoặc không tiêu thụ được. Dùng khi: cần giữ lại message lỗi để xử lý sau, hoặc phân tách message lỗi ra khỏi luồng chính. Cấu hình ở queue: x-dead-letter-exchange, x-dead-letter-routing-key.'
-      },
-      {
-        question: 'RabbitMQ clustering hoạt động như thế nào?',
-        answer: 'Nhiều RabbitMQ node làm việc cùng nhau như 1 cluster. Queue có thể được phân phối hoặc sao chép giữa các node. Yêu cầu: tất cả node trong cùng 1 mạng, có thể giao tiếp với nhau. Data có thể lưu trữ bền vững hoặc chỉ trong bộ nhớ.'
-      },
-      {
-        question: 'RabbitMQ security: authentication và authorization thế nào?',
-        answer: 'Authentication: xác thực người dùng thông qua mã hóa (chứng chỉ SSL/TLS). Authorization: cấp quyền cho người dùng trên các đối tượng RabbitMQ (queue, exchange) qua policy. Thực hiện qua RabbitMQ Management Plugin hoặc CLI.'
-      },
-      {
-        question: 'RabbitMQ với .NET Core - best practices là gì?',
-        answer: 'Use Masstransit cho abstraction. Define message contracts rõ ràng. Use DTOs thay vì entity. Versioning messages. Handle idempotency và retry trong consumer. Log và giám sát tầng messaging. Kiểm tra lỗi bằng cách sử dụng thử nghiệm tích hợp.'
-      },
-    ],
-  },
-
-  // RABBITMQ VS KAFKA
-  {
-    id: 'rabbitmq-vs-kafka',
-    problem: 'Nên dùng RabbitMQ hay Kafka cho ứng dụng phân tán?',
-    theory: [
-      'RabbitMQ: message broker, hỗ trợ multiple messaging protocols.',
-      'Kafka: distributed event streaming platform, lưu trữ event theo thứ tự.',
-      'RabbitMQ: latency thấp, routing linh hoạt.',
-      'Kafka: xử lý throughput cao, lưu trữ bền vững.',
-    ],
-    codeExamples: [
-      {
-        title: 'Kết nối với RabbitMQ và Kafka trong .NET',
-        language: 'csharp',
-        code: `// RabbitMQ
-services.AddMassTransit(x =>
-{
-    x.UsingRabbitMq((context, cfg) =>
-    {
-        cfg.Host("rabbitmq://localhost");
-    });
-});
-
-// Kafka
-services.AddMassTransit(x =>
-{
-    x.UsingKafka((context, cfg) =>
-    {
-        cfg.Host("kafka://localhost");
-    });
-});`,
-      },
-    ],
-    libraries: [
-      { name: 'MassTransit', nuget: 'MassTransit', desc: 'Framework hỗ trợ RabbitMQ và Kafka' },
-      { name: 'Confluent.Kafka', nuget: 'Confluent.Kafka', desc: 'Official Kafka .NET client' },
-    ],
-    qa: [
-      { question: 'RabbitMQ và Kafka khác nhau ở điểm nào?', answer: 'RabbitMQ là message broker chỉnh chuộc cho từng message, Kafka là nền tảng stream event phân tán. RabbitMQ hỗ trợ nhiều giao thức messaging, Kafka thì không. RabbitMQ thích hợp với các ứng dụng cần độ trễ thấp và định tuyến linh hoạt, Kafka phù hợp với các ứng dụng phân tích dữ liệu thời gian thực và cần xử lý lượng lớn dữ liệu.' },
-      { question: 'Khi nào nên dùng RabbitMQ, khi nào nên dùng Kafka?', answer: 'RabbitMQ: ứng dụng cần giao tiếp bất đồng bộ đơn giản, độ trễ thấp. Kafka: ứng dụng cần phân tích dữ liệu thời gian thực, cần lưu trữ và xử lý lượng lớn sự kiện.' },
-      {
-        question: 'RabbitMQ có guarantee delivery không?',
-        answer: 'Có, với điều kiện cấu hình đúng: sử dụng durable queues, persistent messages và xác nhận (acknowledgment). Tuy nhiên, trong trường hợp mất điện đột ngột, có thể mất tin nhắn chưa được ghi vào đĩa.'
-      },
-      {
-        question: 'Kafka có guarantee exactly-once delivery không?',
-        answer: 'Có, với cấu hình đúng và khi sử dụng Kafka 0.11 trở lên. Cần sử dụng idempotent producers và transactional APIs của Kafka. Tuy nhiên, điều này có thể làm giảm hiệu suất.'
-      },
-      {
-        question: 'RabbitMQ và Kafka - cái nào mạnh hơn?',
-        answer: 'Không cái nào mạnh hơn hoàn toàn. RabbitMQ linh hoạt hơn với nhiều giao thức hỗ trợ, Kafka thì mạnh về xử lý luồng dữ liệu lớn và phân tán. Tùy vào nhu cầu cụ thể mà chọn cái phù hợp.'
-      },
+      { question: 'RabbitMQ vs Kafka khi nào dùng?', answer: 'RabbitMQ: complex routing, request-reply, priority queues, TTL, traditional messaging. Kafka: high throughput, event streaming, replay, log aggregation. Best: RabbitMQ cho microservices messaging, Kafka cho event streaming/analytics.' },
+      { question: 'Prefetch count best practice?', answer: 'Prefetch = số messages gửi đồng thời cho 1 consumer. Low (1-10): fair distribution, slow processing OK. High (50-100): throughput cao, cần consumer xử lý nhanh. Best: start 10, tune theo CPU/memory.' },
+      { question: 'Dead letter queue strategy?', answer: 'DLQ cho messages fail sau N retries. Best practice: (1) Separate DLQ per queue. (2) Alert khi DLQ có message. (3) Manual inspection/retry. (4) TTL trên DLQ. (5) Log context (exception, headers) vào DLQ message.' },
+      { question: 'Message priority có thực sự work trong RabbitMQ không? Overhead?', answer: 'Priority queues WORK nhưng có trade-offs: (1) Declare queue x-max-priority (recommend 5-10). (2) Performance overhead ~10-20% vì sorting. (3) Starvation risk: low priority chờ mãi. Best: TRÁNH priorities, dùng separate queues cho critical vs normal traffic.' },
+      { question: 'Publisher confirms vs transactions - so sánh?', answer: 'Publisher confirms: async ACK từ broker, throughput ~10K msg/s. Transactions: synchronous, blocking, ~1K msg/s. Best practice: LUÔN dùng publisher confirms. Confirms + persistent messages + mandatory flag = reliable delivery.' },
+      { question: 'Auto-ack vs manual ack - rủi ro?', answer: 'Auto-ack: broker xóa message ngay khi gửi -> consumer crash = MẤT message. Manual ack: consumer explicit ACK sau khi process xong -> broker retry nếu crash. Best: LUÔN manual ack trong production. basicAck() after success, basicNack(requeue=true) on failure.' },
+      { question: 'Quorum queues vs classic mirrored queues?', answer: 'Classic mirrored: DEPRECATED. Quorum queues: Raft-based replication, RECOMMENDED cho HA. Performance: quorum ~30% chậm hơn nhưng durable. Best: (1) Quorum cho critical data. (2) 3-5 node cluster (số lẻ). (3) Cross-AZ deployment.' },
     ],
   },
 
@@ -840,59 +782,65 @@ components:
   // REDIS
   {
     id: 'redis',
-    problem: 'Cần một giải pháp lưu trữ tạm thời nhanh chóng cho dữ liệu hay truy cập.',
+    problem: 'Product query mỗi request -> DB load cao. Cần cache sub-millisecond. Cần distributed lock cho concurrency control giữa nhiều instances.',
     theory: [
-      'Redis: in-memory data structure store, dùng làm database, cache, message broker.',
-      'Key-value store: dữ liệu được lưu trữ dưới dạng cặp khóa-giá trị.',
-      'Data types: string, hash, list, set, sorted set, bitmap, hyperloglog, geospatial.',
-      'Pub/Sub: mô hình phát hiện thông điệp giữa các dịch vụ.',
-      'Persistence: snapshotting (RDB), append-only file (AOF), hoặc kết hợp cả hai.',
+      'In-memory data store: sub-millisecond latency, dùng làm cache, session store, message broker.',
+      'Data structures: String, Hash, List, Set, Sorted Set, Stream, HyperLogLog.',
+      'Cache patterns: Cache-Aside (lazy load), Write-Through (đồng bộ), Write-Behind (bất đồng bộ).',
+      'TTL (Time-to-Live): tự expire cache, tránh stale data.',
+      'Distributed Lock: SETNX + TTL, Redlock algorithm cho multi-node.',
+      'Pub/Sub vs Streams: Pub/Sub fire-and-forget, Streams persistent + consumer groups.',
     ],
     codeExamples: [
       {
-        title: 'Sử dụng StackExchange.Redis',
+        title: 'Cache-Aside Pattern + Distributed Lock',
         language: 'csharp',
-        code: `var options = ConfigurationOptions.Parse("localhost:6379");
-options.AbortOnConnectFail = false;
-var redis = ConnectionMultiplexer.Connect(options);
-var db = redis.GetDatabase();
+        code: `// Cache-Aside
+public async Task<ProductDto?> GetProduct(Guid id)
+{
+    var key = $"product:{id}";
+    var cached = await _cache.GetStringAsync(key);
+    if (cached != null)
+        return JsonSerializer.Deserialize<ProductDto>(cached);
 
-// Set value with expiration
-db.StringSet("mykey", "Hello, Redis!", TimeSpan.FromMinutes(5));
+    var product = await _db.Products.FindAsync(id);
+    if (product == null) return null;
 
-// Get value
-string value = db.StringGet("mykey");
+    await _cache.SetStringAsync(key,
+        JsonSerializer.Serialize(product),
+        new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+        });
+    return _mapper.Map<ProductDto>(product);
+}
 
-// Publish/Subscribe
-var subscriber = redis.GetSubscriber();
-subscriber.Subscribe("messages", (channel, message) => {
-    Console.WriteLine($"Received: {message}");
-});
+// Distributed Lock
+await using var redLock = await _lockFactory.CreateLockAsync(
+    $"lock:order:{orderId}",
+    expiryTime: TimeSpan.FromSeconds(30),
+    waitTime: TimeSpan.FromSeconds(10),
+    retryTime: TimeSpan.FromMilliseconds(200));
 
-// Publish a message
-subscriber.Publish("messages", "Hello, subscribers!");`,
+if (redLock.IsAcquired)
+{
+    await ProcessOrder(orderId);
+}`,
       },
     ],
     libraries: [
-      { name: 'StackExchange.Redis', nuget: 'StackExchange.Redis', desc: 'Official .NET client for Redis' },
-      { name: 'ServiceStack.Redis', nuget: 'ServiceStack.Redis', desc: 'Redis client with high-level API' },
+      { name: 'StackExchange.Redis', nuget: 'StackExchange.Redis', desc: 'High-performance Redis client' },
+      { name: 'RedLock.net', nuget: 'RedLock.net', desc: 'Distributed lock (Redlock algorithm)' },
+      { name: 'Microsoft.Extensions.Caching.StackExchangeRedis', nuget: 'Microsoft.Extensions.Caching.StackExchangeRedis', desc: 'IDistributedCache implementation' },
     ],
     qa: [
-      { question: 'Redis là gì?', answer: 'Redis là một kho lưu trữ dữ liệu in-memory, thường được sử dụng như một cơ sở dữ liệu tạm thời (cache) để tăng tốc độ truy cập dữ liệu cho các ứng dụng.' },
-      { question: 'Các kiểu dữ liệu chính trong Redis là gì?', answer: 'Các kiểu dữ liệu bao gồm: string, hash, list, set, sorted set, bitmap, hyperloglog, geospatial.' },
-      { question: 'Redis Pub/Sub hoạt động như thế nào?', answer: 'Mô hình phát hiện thông điệp, nơi một dịch vụ có thể công bố một tin nhắn lên một kênh và các dịch vụ khác có thể đăng ký nhận thông điệp từ kênh đó.' },
-      {
-        question: 'Persistence trong Redis hoạt động như thế nào?',
-        answer: 'Redis hỗ trợ snapshotting (RDB) và append-only file (AOF) để lưu trữ dữ liệu bền vững. RDB tạo ra các bản lưu nhanh, trong khi AOF ghi lại tất cả các thay đổi dữ liệu.'
-      },
-      {
-        question: 'Lambda functions trong Redis là gì?',
-        answer: 'Tính năng cho phép người dùng định nghĩa các hàm tùy chỉnh và chạy chúng trực tiếp trên server Redis, giảm thiểu dữ liệu truyền qua lại và tăng hiệu suất xử lý.'
-      },
-      {
-        question: 'Các chiến lược hết bộ nhớ (memory eviction policies) trong Redis là gì?',
-        answer: 'Các chính sách bao gồm: no eviction, allkeys-lru, allkeys-lfu, volatile-lru, volatile-lfu, và một số chế độ khác. Xem xét kỹ tài liệu Redis để chọn chính sách phù hợp.'
-      },
+      { question: 'Cache invalidation strategies?', answer: '(1) TTL-based: đơn giản, eventual consistency. (2) Event-based: publish InvalidateCache event khi data thay đổi. (3) Write-through: update cache + DB cùng lúc. (4) Cache tags: invalidate nhóm related keys. Best: kết hợp TTL + event-based invalidation.' },
+      { question: 'Redis Cluster vs Sentinel?', answer: 'Sentinel: master-replica setup, automatic failover, đơn giản. Cluster: data sharding across nodes, horizontal scaling, phức tạp hơn. Best: Sentinel cho HA (high availability), Cluster cho large dataset cần shard.' },
+      { question: 'Distributed lock với Redis có reliable không?', answer: 'Redlock algorithm: lock trên majority nodes. Martin Kleppmann critique: network partition -> 2 clients cùng giữ lock. Best: dùng cho performance optimization (tránh duplicate work), KHÔNG dùng cho correctness-critical (dùng DB unique constraint thay thế).' },
+      { question: 'RDB vs AOF persistence - chiến lược?', answer: 'RDB (snapshot): compact, restore nhanh, có thể mất data giữa 2 snapshots. AOF (append-only log): durable hơn, restore chậm, file lớn. Hybrid: RDB+AOF tốt nhất cả hai. Best: RDB+AOF cho production, RDB-only cho pure cache.' },
+      { question: 'Redis eviction policies - LRU vs LFU?', answer: 'LRU: evict ít được truy cập gần đây nhất. LFU: evict ít được truy cập thường xuyên nhất. allkeys-lru cho general cache. volatile-ttl cho session store. LFU tốt hơn LRU khi access patterns không đều. Best: allkeys-lru mặc định, theo dõi evicted_keys metric.' },
+      { question: 'Redis Pub/Sub vs Streams - khi nào dùng gì?', answer: 'Pub/Sub: fire-and-forget, không persistent, subscriber offline = mất message. Streams: persistent log (giống Kafka), consumer groups, replay được. Best: Pub/Sub cho ephemeral events (WebSocket fanout), Streams cho durable messaging cần at-least-once.' },
+      { question: 'Redis memory optimization techniques?', answer: '(1) Hash fields thay vì separate keys. (2) Compression (MessagePack/Protobuf). (3) TTL tích cực. (4) UNLINK thay vì DEL cho large keys (xóa async). (5) redis-cli --bigkeys tìm keys lớn. (6) maxmemory + eviction policy. Best: giữ dưới 80% maxmemory.' },
     ],
   },
 
@@ -1118,6 +1066,345 @@ public class OrderConsumer : IConsumer<Order>
         question: 'Outbox + Saga: outbox cho internal events hay cả commands?',
         answer: 'CẢ HAI! Pattern: (1) Domain aggregate emit events -> outbox. (2) Saga state machine emit commands -> outbox (nếu dùng message bus). (3) External events vào inbox. Flow: Command -> Handler -> Aggregate -> Domain Event -> Outbox -> Bus -> Saga -> Command -> Outbox. MassTransit: tích hợp outbox cho both events & commands. Best: consistency toàn bộ messaging qua outbox.'
       },
+    ],
+  },
+
+  // SAGA PATTERN
+  {
+    id: 'saga',
+    problem: 'Order flow 3 bước: Reserve Stock -> Payment -> Shipment. Mỗi service DB riêng, không thể dùng 1 transaction. Payment fail -> cần rollback Stock đã reserve.',
+    theory: [
+      'Saga = chuỗi local transactions. Mỗi service xử lý 1 step với DB riêng.',
+      'Fail -> compensating transactions chạy ngược lại (KHÔNG phải DB rollback, mà là business logic ngược).',
+      'Compensating != rollback: tạo transaction mới để undo (VD: ReleaseStock, RefundPayment).',
+      'Orchestration Saga: centralized coordinator biết toàn bộ flow.',
+      'Choreography Saga: decentralized, mỗi service tự react với events.',
+      'Saga state lưu persistent (DB/Redis) -> survive crash, restart tiếp tục.',
+    ],
+    codeExamples: [
+      {
+        title: 'MassTransit Saga State Machine với Compensations',
+        language: 'csharp',
+        code: `public class OrderSagaState : SagaStateMachineInstance
+{
+    public Guid CorrelationId { get; set; }
+    public string CurrentState { get; set; }
+    public Guid OrderId { get; set; }
+    public decimal TotalAmount { get; set; }
+}
+
+public class OrderSaga : MassTransitStateMachine<OrderSagaState>
+{
+    public State StockReserving { get; private set; }
+    public State PaymentProcessing { get; private set; }
+    public State Completed { get; private set; }
+    public State Failed { get; private set; }
+
+    public Event<OrderCreatedEvent> OrderCreated { get; private set; }
+    public Event<StockReservedEvent> StockReserved { get; private set; }
+    public Event<PaymentCompletedEvent> PaymentCompleted { get; private set; }
+    public Event<PaymentFailedEvent> PaymentFailed { get; private set; }
+
+    public OrderSaga()
+    {
+        InstanceState(x => x.CurrentState);
+
+        Initially(
+            When(OrderCreated)
+                .Then(ctx => ctx.Saga.OrderId = ctx.Message.OrderId)
+                .Send(new Uri("queue:reserve-stock"),
+                    ctx => new ReserveStockCommand(ctx.Saga.OrderId))
+                .TransitionTo(StockReserving)
+        );
+
+        During(StockReserving,
+            When(StockReserved)
+                .Send(new Uri("queue:process-payment"),
+                    ctx => new ProcessPaymentCommand(
+                        ctx.Saga.OrderId, ctx.Saga.TotalAmount))
+                .TransitionTo(PaymentProcessing)
+        );
+
+        During(PaymentProcessing,
+            When(PaymentCompleted)
+                .TransitionTo(Completed)
+                .Finalize(),
+            When(PaymentFailed)
+                // COMPENSATE: giải phóng stock đã reserve
+                .Send(new Uri("queue:release-stock"),
+                    ctx => new ReleaseStockCommand(ctx.Saga.OrderId))
+                .TransitionTo(Failed)
+        );
+    }
+}`,
+      },
+    ],
+    libraries: [
+      { name: 'MassTransit', nuget: 'MassTransit', desc: 'Saga state machine framework' },
+      { name: 'MassTransit.EntityFrameworkCore', nuget: 'MassTransit.EntityFrameworkCore', desc: 'Lưu saga state qua EF Core' },
+      { name: 'NServiceBus', nuget: 'NServiceBus', desc: 'Enterprise saga support' },
+    ],
+    qa: [
+      { question: 'ACD properties của Saga là gì? Thiếu gì so với ACID?', answer: 'Saga có: Atomicity (qua compensating), Consistency (eventual), Durability (persistent state). THIẾU: Isolation -> dirty reads, non-repeatable reads. Giải pháp: semantic lock, commutative updates, versioning.' },
+      { question: 'Làm sao test Saga?', answer: '(1) Unit test: test state transitions riêng. (2) Integration test: in-memory broker, test harness (MassTransit.Testing). (3) Contract test: verify message schemas. (4) Chaos testing: kill services giữa flow. Tools: MassTransit test harness, Testcontainers.' },
+      { question: 'Saga timeout strategy?', answer: 'Schedule timeout event khi bắt đầu step. Response về trước timeout -> cancel. Timeout fire -> compensate. Best practice: timeout = 2x expected latency + buffer. Cần idempotency để handle response đến SAU khi timeout đã fire.' },
+      { question: 'Compensating transactions có idempotent không? Chạy 2 lần thì sao?', answer: 'Compensating PHẢI idempotent! VD: ReleaseStock chạy 2 lần không được trả stock 2 lần. Solutions: (1) Check state trước khi compensate (cờ IsReleased). (2) Idempotency key. (3) DB unique constraint. Best: thiết kế compensating tự nhiên idempotent (SET thay vì INCREMENT).' },
+      { question: 'Saga isolation problem: dirty reads khi đang compensating?', answer: 'Vấn đề: Order đang compensate nhưng user thấy "Completed". Solutions: (1) Semantic lock: cờ "IsCompensating" trong Order. (2) Status progression: Pending -> Processing -> Completed. (3) Version field + optimistic locking. Best: semantic lock + status machine.' },
+      { question: 'Nested/hierarchical sagas có khả thi không?', answer: 'KHẢ THI nhưng RẤT PHỨC TẠP! Parent saga gửi command -> child saga. Thách thức: compensating cascades, correlation tracking, deadlock risk, debug rất khó. Best practice: TRÁNH nested sagas. Flatten hierarchy hoặc refactor thành sequential steps.' },
+      { question: 'Performance: Orchestration Saga vs Choreography Saga?', answer: 'Orchestration: thêm hop qua orchestrator (latency +10-50ms). Choreography: direct peer-to-peer (latency thấp hơn). Throughput: Choreography ~2x cao hơn. Nhưng: Choreography khó debug/trace. Best: chọn theo complexity vs performance needs.' },
+    ],
+  },
+
+  // INBOX
+  {
+    id: 'inbox',
+    problem: 'RabbitMQ at-least-once delivery -> message trùng lặp. Reserve stock 2 lần -> stock sai, payment charge 2 lần -> mất tiền.',
+    theory: [
+      'Message broker đảm bảo at-least-once -> CÓ THỂ gửi trùng message.',
+      'Inbox pattern: theo dõi MessageId đã xử lý trong bảng InboxMessages.',
+      'Flow: nhận message -> kiểm tra MessageId trong inbox -> trùng -> bỏ qua, mới -> xử lý + lưu inbox.',
+      'Idempotency: xử lý N lần -> kết quả giống nhau như chỉ xử lý 1 lần.',
+      'Check + Process + Save Inbox PHẢI CÙNG transaction để tránh race condition.',
+      'At-least-once + Idempotency = effectively exactly-once từ góc nhìn business.',
+    ],
+    codeExamples: [
+      {
+        title: 'Inbox Pattern - Idempotent Consumer',
+        language: 'csharp',
+        code: `// Inbox entity
+public class InboxMessage
+{
+    public Guid MessageId { get; set; }
+    public string ConsumerType { get; set; }
+    public DateTime ProcessedAt { get; set; }
+}
+
+// Idempotent consumer
+public class ReserveStockConsumer : IConsumer<ReserveStockCommand>
+{
+    private readonly InventoryDbContext _db;
+
+    public async Task Consume(ConsumeContext<ReserveStockCommand> ctx)
+    {
+        var messageId = ctx.MessageId
+            ?? throw new InvalidOperationException("Missing MessageId");
+
+        // Kiểm tra đã xử lý chưa
+        var exists = await _db.InboxMessages
+            .AnyAsync(m => m.MessageId == messageId
+                && m.ConsumerType == nameof(ReserveStockConsumer));
+        if (exists) return; // Bỏ qua message trùng!
+
+        // Xử lý business logic
+        var product = await _db.Products.FindAsync(ctx.Message.ProductId);
+        product.Stock -= ctx.Message.Quantity;
+
+        // Lưu inbox + business change CÙNG transaction
+        _db.InboxMessages.Add(new InboxMessage
+        {
+            MessageId = messageId,
+            ConsumerType = nameof(ReserveStockConsumer),
+            ProcessedAt = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync(); // Atomic!
+    }
+}
+
+// MassTransit built-in inbox (cách khác)
+services.AddMassTransit(x =>
+{
+    x.AddEntityFrameworkOutbox<OrderDbContext>(o =>
+    {
+        o.UsePostgres();
+        o.UseBusOutbox();    // Outbox cho publishing
+        // Inbox tự động kích hoạt cho mỗi consumer
+    });
+});`,
+      },
+    ],
+    libraries: [
+      { name: 'MassTransit.EntityFrameworkCore', nuget: 'MassTransit.EntityFrameworkCore', desc: 'Built-in outbox + inbox support' },
+      { name: 'CAP', nuget: 'DotNetCore.CAP', desc: 'Idempotent consumer support' },
+    ],
+    qa: [
+      { question: 'Idempotency key nên dùng gì: MessageId hay business key?', answer: 'MessageId: unique cho mỗi message, đơn giản. Business key (OrderId + Action): handle retry với MessageId khác. Best: MessageId mặc định, business key khi cần cross-instance idempotency.' },
+      { question: 'Inbox pattern có overhead performance không?', answer: 'CÓ: mỗi message thêm 1 query + 1 insert. Tối ưu: (1) In-memory cache recent MessageIds (Bloom filter/LRU). (2) Batch inserts. (3) Partition inbox table. (4) Index (MessageId, ConsumerType). Best: đo trước, cache cho hot paths.' },
+      { question: 'Exactly-once delivery có tồn tại không?', answer: 'KHÔNG trong distributed systems (bất khả thi về mặt lý thuyết). At-least-once + Idempotency = effectively exactly-once từ góc nhìn business. Kafka "exactly-once" = idempotent producer + transactional consumer, KHÔNG phải true exactly-once.' },
+      { question: 'Inbox cleanup: retention policy?', answer: 'Chiến lược: (1) TTL-based: xóa sau N ngày (VD: 30 ngày). (2) Partition theo ngày. (3) Archive data cũ. (4) Retention = max retry window + buffer. Best: index trên (MessageId, ProcessedAt), theo dõi table size, hard delete sau 7 ngày.' },
+      { question: 'Consumer crash giữa chừng: đã xử lý business nhưng chưa lưu inbox?', answer: 'Race condition NGHIÊM TRỌNG! Solution: business logic + inbox insert PHẢI CÙNG transaction. Code: using var tx = BeginTransaction(); Process(); SaveInbox(); Commit(); MassTransit EF outbox xử lý atomic. KHÔNG ĐƯỢC tách riêng business tx vs inbox tx!' },
+      { question: 'High-throughput consumers (10K msg/s): inbox có thành bottleneck không?', answer: 'CÓ THỂ nếu không tối ưu! Solutions: (1) Bloom filter / LRU cache cho recent MessageIds (99% cache hits). (2) Batch inserts (buffer 100 msgs -> bulk insert). (3) Partition inbox (shard theo MessageId hash). (4) Redis Set cho inbox. Benchmark: DB ~1K/s, cached ~10K/s, Redis ~50K/s.' },
+      { question: 'Inbox + Saga: mỗi saga step cần inbox riêng hay dùng chung?', answer: 'RIÊNG cho mỗi consumer type! Lý do: (1) Cùng MessageId có thể được consume bởi nhiều consumers (fan-out). (2) Idempotency tính theo từng consumer. Schema: composite key (MessageId, ConsumerType). MassTransit: tự động xử lý per consumer. Best: tách riêng = rõ ràng + isolation.' },
+    ],
+  },
+
+  // CQRS
+  {
+    id: 'cqrs',
+    problem: 'OrderService vừa create/update (write-heavy) vừa query/search (read-heavy). Cùng model -> thoả hiệp cả hai, không optimize được cho bên nào.',
+    theory: [
+      'CQRS: tách Write model (Command) và Read model (Query) thành 2 paths riêng biệt.',
+      'Command side: domain model phức tạp, validation, business rules.',
+      'Query side: denormalized views, tối ưu cho read performance.',
+      'Read model có thể nằm ở DB riêng (Elasticsearch, Redis, materialized views).',
+      'Event Sourcing + CQRS: kết hợp tự nhiên, events build read models qua projections.',
+      'Trade-off: complexity tăng, eventual consistency giữa write và read.',
+    ],
+    codeExamples: [
+      {
+        title: 'Command & Query Separation với MediatR',
+        language: 'csharp',
+        code: `// COMMAND (Write side)
+public record CreateOrderCommand(string CustomerId, List<OrderItemDto> Items)
+    : IRequest<Guid>;
+
+public class CreateOrderHandler : IRequestHandler<CreateOrderCommand, Guid>
+{
+    public async Task<Guid> Handle(CreateOrderCommand cmd, CancellationToken ct)
+    {
+        var order = Order.Create(cmd.CustomerId, cmd.Items);
+        _writeDb.Orders.Add(order);
+        await _writeDb.SaveChangesAsync(ct);
+        await _bus.Publish(new OrderCreatedEvent
+        {
+            OrderId = order.Id,
+            CustomerName = order.CustomerName,
+            ItemsSummary = order.GetItemsSummary()
+        });
+        return order.Id;
+    }
+}
+
+// QUERY (Read side - denormalized)
+public record GetOrderQuery(Guid OrderId) : IRequest<OrderReadModel?>;
+
+public class GetOrderHandler : IRequestHandler<GetOrderQuery, OrderReadModel?>
+{
+    public async Task<OrderReadModel?> Handle(GetOrderQuery q, CancellationToken ct)
+    {
+        return await _readDb.OrderReadModels
+            .AsNoTracking()
+            .FirstOrDefaultAsync(o => o.OrderId == q.OrderId, ct);
+    }
+}
+
+// PROJECTION (Build read model từ events)
+public class OrderProjection : IConsumer<OrderCreatedEvent>
+{
+    public async Task Consume(ConsumeContext<OrderCreatedEvent> ctx)
+    {
+        await _readDb.OrderReadModels.AddAsync(new OrderReadModel
+        {
+            OrderId = ctx.Message.OrderId,
+            CustomerName = ctx.Message.CustomerName,
+            ItemsSummary = ctx.Message.ItemsSummary,
+            CreatedAt = DateTime.UtcNow
+        });
+        await _readDb.SaveChangesAsync();
+    }
+}`,
+      },
+    ],
+    libraries: [
+      { name: 'MediatR', nuget: 'MediatR', desc: 'Command/Query dispatch' },
+      { name: 'Marten', nuget: 'Marten', desc: 'Event sourcing + projections trên PostgreSQL' },
+      { name: 'EventStoreDB', nuget: 'EventStore.Client', desc: 'Specialized event database' },
+    ],
+    qa: [
+      { question: 'Có nhất thiết phải separate DB cho CQRS không?', answer: 'KHÔNG. Có thể bắt đầu: (1) Cùng DB, separate tables. (2) Cùng DB, SQL views. (3) Separate DB khi cần scale. Best: bắt đầu đơn giản (same DB), mở rộng khi cần thiết.' },
+      { question: 'Eventual consistency trong CQRS ảnh hưởng UX thế nào?', answer: 'User tạo order -> query ngay có thể chưa thấy. Giải pháp: (1) Optimistic UI: hiển thị ngay data vừa submit. (2) Polling/SignalR thông báo khi projection xong. (3) Trả data trong command response. (4) Session cache.' },
+      { question: 'CQRS có phù hợp với mọi bounded context không?', answer: 'KHÔNG. Dùng khi: read/write patterns khác nhau rõ rệt, cần scale riêng, complex queries. KHÔNG dùng: simple CRUD, read/write cân bằng. Best: selective CQRS cho specific contexts.' },
+      { question: 'Command validation nên đặt ở đâu?', answer: 'Hai layers: (1) Basic validation (required, format) -> MediatR pipeline behavior (FluentValidation). (2) Business validation (stock còn hàng, user có quyền) -> trong Command handler. KHÔNG duplicate validation logic giữa 2 layers!' },
+      { question: 'Projection lag: user write xong thấy stale data?', answer: 'Giải pháp: (1) Projection SLA: 99% < 500ms. (2) Inline projection: update read model đồng bộ trong transaction (đánh đổi consistency vs perf). (3) Version-based queries. (4) Fallback đọc từ write model cho fresh reads. Best: đo lag, tối ưu projections.' },
+      { question: 'Nhiều read models từ cùng event - maintain ra sao?', answer: 'Event-driven projections: 1 event -> N projections subscribe. Idempotent handlers. Theo dõi lag mỗi model. Rebuild: drop + replay events. Tools: Marten auto-projections, custom workers. Best: versioned events + projection rebuild pipeline.' },
+      { question: 'Command idempotency: user submit form 2 lần?', answer: 'Giải pháp: (1) Client-side idempotency token (GUID) gửi cùng command. (2) Server check token trong bảng IdempotencyKeys. (3) Natural idempotency: unique constraint. (4) MediatR pipeline behavior kiểm tra token. Best: kết hợp token + unique constraints.' },
+    ],
+  },
+
+    // REPOSITORY
+  {
+    id: 'repository',
+    problem: 'Business logic dung DbContext truc tiep -> coupling chat vao EF Core, kho unit test, query logic lan man khap noi.',
+    theory: [
+      'Repository: abstraction layer giua domain va data access.',
+      'IRepository<T> generic cho CRUD co ban.',
+      'Specific repository (IOrderRepository) cho complex queries cua domain.',
+      'Unit of Work: group nhieu operations -> 1 transaction (DbContext da la UoW).',
+      'Specification pattern: composable, reusable query logic.',
+      'Controversy: EF Core DbContext DA LA Repository + UoW, them layer = over-engineering?',
+    ],
+    codeExamples: [
+      {
+        title: 'Repository + Specification Pattern',
+        language: 'csharp',
+        code: `// Generic interface
+public interface IRepository<T> where T : class
+{
+    Task<T?> GetByIdAsync(Guid id);
+    Task<List<T>> ListAsync(ISpecification<T> spec);
+    Task AddAsync(T entity);
+    Task UpdateAsync(T entity);
+}
+
+// Specific repository
+public interface IOrderRepository : IRepository<Order>
+{
+    Task<List<Order>> GetPendingOrdersAsync();
+    Task<Order?> GetWithItemsAsync(Guid id);
+}
+
+// Implementation
+public class OrderRepository : IOrderRepository
+{
+    private readonly OrderDbContext _db;
+
+    public async Task<Order?> GetByIdAsync(Guid id)
+        => await _db.Orders.FindAsync(id);
+
+    public async Task<List<Order>> GetPendingOrdersAsync()
+        => await _db.Orders
+            .Where(o => o.Status == OrderStatus.Pending)
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync();
+
+    public async Task<Order?> GetWithItemsAsync(Guid id)
+        => await _db.Orders
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.Id == id);
+
+    public async Task AddAsync(Order order)
+    {
+        _db.Orders.Add(order);
+        await _db.SaveChangesAsync();
+    }
+}
+
+// Usage in handler
+public class CreateOrderHandler : IRequestHandler<CreateOrderCommand, Guid>
+{
+    private readonly IOrderRepository _repo;
+
+    public async Task<Guid> Handle(CreateOrderCommand cmd, CancellationToken ct)
+    {
+        var order = new Order(cmd.CustomerId, cmd.Items);
+        await _repo.AddAsync(order);
+        return order.Id;
+    }
+}`,
+      },
+    ],
+    libraries: [
+      { name: 'EF Core', nuget: 'Microsoft.EntityFrameworkCore', desc: 'DbContext = built-in repository + UoW' },
+      { name: 'Ardalis.Specification', nuget: 'Ardalis.Specification', desc: 'Specification pattern library' },
+    ],
+    qa: [
+      { question: 'Repository co phai over-engineering khong?', answer: 'Tranh cai: DbContext DA LA repository + unit of work. Them layer = abstraction khong can thiet. Nhung: (1) Testability (mock IRepo de hon DbContext). (2) Domain khong biet EF Core. (3) Encapsulate complex queries. Best: skip cho simple projects, dung cho DDD/complex domain.' },
+      { question: 'Generic Repository vs Specific Repository?', answer: 'Generic: IRepository<T> cho CRUD don gian. Specific: IOrderRepository cho domain queries. Best: combine ca hai. Generic lam base, specific inherit + add domain methods. TRANH: leak IQueryable ra ngoai.' },
+      { question: 'Repository co nen return IQueryable khong?', answer: 'KHONG. IQueryable leak EF Core vao domain, domain co the build query -> coupling. Best: repository return entities hoac DTOs. Dung Specification pattern cho composable queries thay vi IQueryable.' },
+      { question: 'Specification pattern vs Repository methods?', answer: 'Repo methods: simple, explicit (GetActiveOrders()). Specification: composable, reusable (AndSpec, OrSpec). Best: repo methods cho 80% cases, Specification cho complex dynamic queries. Library: Ardalis.Specification.' },
+      { question: 'Unit of Work co can voi EF Core khong?', answer: 'DbContext = built-in Unit of Work. Custom UoW can khi: coordinate multiple repos, explicit SaveChanges control. Pattern: IUnitOfWork { IOrderRepo Orders; SaveChanges(); }. Best: SKIP custom UoW cho simple apps.' },
+      { question: 'Repository + CQRS: repo cho side nao?', answer: 'Command side: Repository phu hop (load aggregate, modify, save). Query side: KHONG can Repository (direct queries, projections, DTOs). Anti-pattern: repository cho read models. Best: Write -> Domain repo, Read -> query service.' },
+      { question: 'Repository abstraction giup switch ORM (EF -> Dapper)?', answer: 'Giup NHUNG limited: interface khong doi, tests khong sua. Nhung: query semantics khac, transaction handling khac. Reality: hiem khi switch ORM. Best: KHONG design repository chi de "future-proof". Design theo domain needs.' },
     ],
   },
 ];
