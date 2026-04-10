@@ -1,0 +1,44 @@
+version: '3.8'
+
+# ══════════════════════════════════════════════════════════════════
+# Docker Compose cho infrastructure:
+# - RabbitMQ: Message broker cho giao tiếp giữa các microservice
+# - SQL Server: Database cho mỗi service (mỗi service 1 DB riêng)
+#
+# Chạy: docker-compose up -d
+# ══════════════════════════════════════════════════════════════════
+
+services:
+  # ── RabbitMQ ──────────────────────────────────────────────────
+  # Message broker - trung gian gửi/nhận message giữa các service.
+  # Management UI: http://localhost:15672 (guest/guest)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: microservice-rabbitmq
+    ports:
+      - "5673:5672"     # AMQP protocol (host 5673 → container 5672)
+      - "15673:15672"   # Management UI (host 15673 → container 15672)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # ── SQL Server ────────────────────────────────────────────────
+  # Mỗi microservice có DB riêng (Database per Service pattern).
+  # 3 databases: OrderDb, PaymentDb, InventoryDb
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: microservice-sqlserver
+    ports:
+      - "1433:1433"
+    environment:
+      SA_PASSWORD: "YourStr0ngP@ssword!"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+
+volumes:
+  rabbitmq-data:
+  sqlserver-data:
