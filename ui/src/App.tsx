@@ -18,9 +18,9 @@ export default function App() {
   const [isLive, setIsLive] = useState(false);
 
   return (
-    <div style={{ minHeight: '100vh', background: isDark ? t.bg : t.bg, fontFamily: "'Inter', 'Segoe UI', -apple-system, sans-serif" }}>
+    <div style={{ minHeight: '100vh', background: isDark ? t.bg : t.bg, fontFamily: "'Inter', 'Segoe UI', 'Tahoma', -apple-system, sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&subset=latin,latin-ext,vietnamese&display=swap');
         @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:.8} }
         @keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -42,10 +42,10 @@ export default function App() {
         boxShadow: isDark ? '0 4px 30px rgba(40,42,54,0.6)' : '0 4px 30px rgba(102,126,234,0.3)',
         position: 'relative', overflow: 'hidden',
       }}>
-        <div style={{ position:'absolute',top:-30,right:80,width:120,height:120,borderRadius:'50%',background: isDark ? 'rgba(189,147,249,0.06)' : 'rgba(255,255,255,0.08)' }} />
-        <div style={{ position:'absolute',bottom:-20,left:'30%',width:80,height:80,borderRadius:'50%',background: isDark ? 'rgba(255,121,198,0.04)' : 'rgba(255,255,255,0.06)' }} />
+        <div style={{ position: 'absolute', top: -30, right: 80, width: 120, height: 120, borderRadius: '50%', background: isDark ? 'rgba(189,147,249,0.06)' : 'rgba(255,255,255,0.08)' }} />
+        <div style={{ position: 'absolute', bottom: -20, left: '30%', width: 80, height: 80, borderRadius: '50%', background: isDark ? 'rgba(255,121,198,0.04)' : 'rgba(255,255,255,0.06)' }} />
 
-        <div style={{ display:'flex', alignItems:'center', gap:14, zIndex:1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, zIndex: 1 }}>
           <button onClick={() => setMenuOpen(v => !v)} style={{
             width: 38, height: 38, borderRadius: 10,
             background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
@@ -56,60 +56,66 @@ export default function App() {
             {menuOpen ? <XIcon size={18} color="#fff" /> : <Menu size={18} color="#fff" />}
           </button>
           <div style={{
-            width:42, height:42, borderRadius:12,
+            width: 42, height: 42, borderRadius: 12,
             background: isDark ? 'rgba(189,147,249,0.2)' : 'rgba(255,255,255,0.2)',
-            display:'flex', alignItems:'center', justifyContent:'center',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
           }} onClick={() => navigate('/')}>
             <Layers size={22} color={isDark ? '#bd93f9' : '#fff'} />
           </div>
           <div style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
-            <h1 style={{ margin:0, fontSize:22, fontWeight:900, color: t.headerText, letterSpacing:-0.5,
-              ...(isDark ? { animation:'draculaGlow 3s ease infinite' } : { textShadow:'0 2px 10px rgba(0,0,0,0.15)' }) }}>
+            <h1 style={{
+              margin: 0, fontSize: 22, fontWeight: 900, color: t.headerText, letterSpacing: -0.5,
+              ...(isDark ? { animation: 'draculaGlow 3s ease infinite' } : { textShadow: '0 2px 10px rgba(0,0,0,0.15)' })
+            }}>
               Microservice Concepts
             </h1>
-            <p style={{ margin:'2px 0 0', fontSize:11, color: t.headerSub, fontWeight:600, letterSpacing:1.5 }}>
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: t.headerSub, fontWeight: 600, letterSpacing: 1.5 }}>
               ORCHESTRATION · SAGA · EVENTUAL CONSISTENCY · OUTBOX · INBOX
             </p>
           </div>
         </div>
 
-        <div style={{ display:'flex', alignItems:'center', gap:12, zIndex:1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, zIndex: 1 }}>
           {pollingStatus && (
             <div style={{
-              display:'flex', alignItems:'center', gap:8,
-              padding:'6px 14px', borderRadius:20,
-              background:'rgba(255,255,255,0.15)', backdropFilter:'blur(10px)',
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 14px', borderRadius: 20,
+              background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)',
             }}>
-              <Activity size={14} color="#fbbf24" style={{ animation:'blink 1s infinite' }} />
-              <span style={{ fontSize:12, color:'#fef3c7', fontWeight:600 }}>{pollingStatus}</span>
-              <span style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>#{pollingCount}</span>
+              <Activity size={14} color="#fbbf24" style={{ animation: 'blink 1s infinite' }} />
+              <span style={{ fontSize: 12, color: '#fef3c7', fontWeight: 600 }}>{pollingStatus}</span>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>#{pollingCount}</span>
             </div>
           )}
           {isAnimating && (
-            <div style={{ padding:'6px 16px', borderRadius:20,
-              background:'rgba(255,255,255,0.2)', backdropFilter:'blur(10px)',
-              display:'flex', alignItems:'center', gap:6 }}>
-              <Zap size={14} color="#fef08a" style={{ animation:'float 1s ease infinite' }} />
-              <span style={{ fontSize:11, fontWeight:700, color:'#fff' }}>RUNNING</span>
+            <div style={{
+              padding: '6px 16px', borderRadius: 20,
+              background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}>
+              <Zap size={14} color="#fef08a" style={{ animation: 'float 1s ease infinite' }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>RUNNING</span>
             </div>
           )}
           {isLive && !isAnimating && !pollingStatus && (
-            <div style={{ padding:'6px 16px', borderRadius:20,
-              background:'rgba(74,222,128,0.2)', backdropFilter:'blur(10px)',
-              display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{
+              padding: '6px 16px', borderRadius: 20,
+              background: 'rgba(74,222,128,0.2)', backdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}>
               <Radio size={14} color="#4ade80" />
-              <span style={{ fontSize:11, fontWeight:700, color:'#4ade80' }}>LIVE</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#4ade80' }}>LIVE</span>
             </div>
           )}
           <button onClick={toggle} style={{
-            padding:'8px 16px', borderRadius:20, border:'none',
+            padding: '8px 16px', borderRadius: 20, border: 'none',
             background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
-            backdropFilter:'blur(10px)', cursor:'pointer',
-            display:'flex', alignItems:'center', gap:6, transition:'all 0.2s',
+            backdropFilter: 'blur(10px)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.2s',
           }}>
             {isDark ? <Sun size={14} color="#f1fa8c" /> : <Moon size={14} color="#fff" />}
-            <span style={{ fontSize:11, fontWeight:600, color:'#fff' }}>{isDark ? 'Light' : 'Dark'}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>{isDark ? 'Light' : 'Dark'}</span>
           </button>
         </div>
       </div>
