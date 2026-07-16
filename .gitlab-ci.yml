@@ -3,9 +3,9 @@
 # Runner: self-hosted Linux with shell executor, Docker required
 
 variables:
-  DOTNET_SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:8.0"
+  DOTNET_SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:9.0"
   NODE_IMAGE: "node:20-alpine"
-  DOCKER_REGISTRY: "${CI_REGISTRY}"
+  DOCKER_REGISTRY: "microservice-demo"
   IMAGE_TAG: "${CI_COMMIT_TAG}"
   DEPLOY_PATH: "/opt/microservice-demo"
 
@@ -26,17 +26,18 @@ build-dotnet:
   tags:
     - gitlab-server
   script:
-    - docker run --rm -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
-      dotnet restore MicroserviceDemo.slnx
-    - docker run --rm -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
-      dotnet build MicroserviceDemo.slnx --configuration Release --no-restore
+    - docker run --rm --network host -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
+      sh -c "dotnet restore MicroserviceDemo.slnx && dotnet build MicroserviceDemo.slnx -c Release --no-restore"
 
 build-ui:
   stage: build
   tags:
     - gitlab-server
   script:
-    - docker run --rm -v "$PWD/ui":/app -w /app $NODE_IMAGE sh -c "npm ci && npm run build"
+    - docker run --rm --network host
+      --user "$(id -u):$(id -g)" -e HOME=/tmp
+      -v "$PWD/ui":/app -w /app $NODE_IMAGE
+      sh -c "npm ci && npm run build"
   artifacts:
     paths:
       - ui/dist/
@@ -51,8 +52,8 @@ test-dotnet:
   needs:
     - build-dotnet
   script:
-    - docker run --rm -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
-      dotnet test MicroserviceDemo.slnx --configuration Release --verbosity normal || true
+    - docker run --rm --network host -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
+      dotnet test MicroserviceDemo.slnx -c Release --verbosity normal || true
   allow_failure: true
 
 # Stage 3: DOCKER BUILD
@@ -65,7 +66,7 @@ docker-build-order:
     - build-dotnet
     - test-dotnet
   script:
-    - docker build
+    - docker build --network host
       -f src/OrderService/Dockerfile
       -t ${DOCKER_REGISTRY}/order-service:${IMAGE_TAG}
       -t ${DOCKER_REGISTRY}/order-service:latest
@@ -79,7 +80,7 @@ docker-build-inventory:
     - build-dotnet
     - test-dotnet
   script:
-    - docker build
+    - docker build --network host
       -f src/InventoryService/Dockerfile
       -t ${DOCKER_REGISTRY}/inventory-service:${IMAGE_TAG}
       -t ${DOCKER_REGISTRY}/inventory-service:latest
@@ -93,7 +94,7 @@ docker-build-payment:
     - build-dotnet
     - test-dotnet
   script:
-    - docker build
+    - docker build --network host
       -f src/PaymentService/Dockerfile
       -t ${DOCKER_REGISTRY}/payment-service:${IMAGE_TAG}
       -t ${DOCKER_REGISTRY}/payment-service:latest
@@ -106,12 +107,11 @@ docker-build-ui:
   needs:
     - build-ui
   script:
-    - docker build
+    - docker build --network host
       -f ui/Dockerfile
       -t ${DOCKER_REGISTRY}/ui:${IMAGE_TAG}
       -t ${DOCKER_REGISTRY}/ui:latest
       .
-
 # Stage 4: DEPLOY 
 
 deploy:
