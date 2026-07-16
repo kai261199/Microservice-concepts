@@ -112,7 +112,7 @@ docker-build-ui:
       -t ${DOCKER_REGISTRY}/ui:latest
       .
 
-# Stage 4: DEPLOY
+# Stage 4: DEPLOY 
 
 deploy:
   stage: deploy
