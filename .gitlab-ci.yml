@@ -1,6 +1,6 @@
 # GitLab CI/CD Pipeline - MicroserviceDemo
 # Runs only on tags (e.g. git tag v1.0.0 && git push --tags)
-# Runner: self-hosted Linux with shell executor, Docker required
+# Runner: self-hosted Linux with shell executor (running as root), Docker required
 
 variables:
   DOTNET_SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:9.0"
@@ -19,33 +19,22 @@ stages:
   - docker-build
   - deploy
 
-# Global: run before/after every job to keep workspace runner-owned
 default:
   tags:
     - gitlab-server
-  before_script:
-    - docker run --rm -v "$PWD":/w -w /w alpine chown -R $(id -u):$(id -g) . 2>/dev/null || true
-  after_script:
-    - docker run --rm -v "$CI_PROJECT_DIR":/w -w /w alpine chown -R $(id -u):$(id -g) . 2>/dev/null || true
 
 # Stage 1: BUILD
 
 build-dotnet:
   stage: build
   script:
-    - docker run --rm --network host
-      --user "$(id -u):$(id -g)"
-      -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -e XDG_DATA_HOME=/tmp
-      -e NUGET_PACKAGES=/tmp/nuget
-      -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
+    - docker run --rm --network host -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
       sh -c "dotnet restore MicroserviceDemo.slnx && dotnet build MicroserviceDemo.slnx -c Release --no-restore"
 
 build-ui:
   stage: build
   script:
-    - docker run --rm --network host
-      --user "$(id -u):$(id -g)" -e HOME=/tmp
-      -v "$PWD/ui":/app -w /app $NODE_IMAGE
+    - docker run --rm --network host -v "$PWD/ui":/app -w /app $NODE_IMAGE
       sh -c "npm ci && npm run build"
   artifacts:
     paths:
@@ -59,11 +48,7 @@ test-dotnet:
   needs:
     - build-dotnet
   script:
-    - docker run --rm --network host
-      --user "$(id -u):$(id -g)"
-      -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -e XDG_DATA_HOME=/tmp
-      -e NUGET_PACKAGES=/tmp/nuget
-      -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
+    - docker run --rm --network host -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
       dotnet test MicroserviceDemo.slnx -c Release --verbosity normal || true
   allow_failure: true
 
