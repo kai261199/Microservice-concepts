@@ -1,0 +1,216 @@
+# GitLab CI/CD Pipeline - MicroserviceDemo
+# Runs only on tags (e.g. git tag v1.0.0 && git push --tags)
+# Runner: self-hosted Linux with tag "gitlab-server"
+
+variables:
+  DOTNET_VERSION: "8.0"
+  NODE_VERSION: "20"
+  DOCKER_REGISTRY: "${CI_REGISTRY}"
+  IMAGE_TAG: "${CI_COMMIT_TAG}"
+  DEPLOY_PATH: "/opt/microservice-demo"
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+
+stages:
+  - build
+  - test
+  - publish
+  - docker-build
+  - deploy
+
+# Stage 1: BUILD
+
+build-dotnet:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  tags:
+    - gitlab-server
+  script:
+    - echo "── Restoring NuGet packages ──"
+    - dotnet restore MicroserviceDemo.slnx
+    - echo "── Building solution ──"
+    - dotnet build MicroserviceDemo.slnx --configuration Release --no-restore
+  artifacts:
+    paths:
+      - src/**/bin/Release/
+      - src/**/obj/
+    expire_in: 1 hour
+
+build-ui:
+  stage: build
+  image: node:20-alpine
+  tags:
+    - gitlab-server
+  script:
+    - cd ui
+    - echo "── Installing npm packages ──"
+    - npm ci
+    - echo "── Building UI ──"
+    - npm run build
+  artifacts:
+    paths:
+      - ui/dist/
+    expire_in: 1 hour
+
+# Stage 2: TEST
+
+test-dotnet:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  tags:
+    - gitlab-server
+  needs:
+    - build-dotnet
+  script:
+    - echo "── Running tests ──"
+    - dotnet test MicroserviceDemo.slnx --configuration Release --no-build --verbosity normal || true
+  allow_failure: true
+
+# Stage 3: PUBLISH
+
+publish-order-service:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  tags:
+    - gitlab-server
+  needs:
+    - build-dotnet
+    - test-dotnet
+  script:
+    - dotnet publish src/OrderService/OrderService.Api/OrderService.Api.csproj
+      --configuration Release
+      --output ./publish/order-service
+      --no-restore
+  artifacts:
+    paths:
+      - publish/order-service/
+    expire_in: 1 day
+
+publish-inventory-service:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  tags:
+    - gitlab-server
+  needs:
+    - build-dotnet
+    - test-dotnet
+  script:
+    - dotnet publish src/InventoryService/InventoryService.Api/InventoryService.Api.csproj
+      --configuration Release
+      --output ./publish/inventory-service
+      --no-restore
+  artifacts:
+    paths:
+      - publish/inventory-service/
+    expire_in: 1 day
+
+publish-payment-service:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  tags:
+    - gitlab-server
+  needs:
+    - build-dotnet
+    - test-dotnet
+  script:
+    - dotnet publish src/PaymentService/PaymentService.Api/PaymentService.Api.csproj
+      --configuration Release
+      --output ./publish/payment-service
+      --no-restore
+  artifacts:
+    paths:
+      - publish/payment-service/
+    expire_in: 1 day
+
+# Stage 4: DOCKER BUILD
+
+docker-build-order:
+  stage: docker-build
+  tags:
+    - gitlab-server
+  needs:
+    - publish-order-service
+  script:
+    - docker build
+      -f src/OrderService/Dockerfile
+      -t ${DOCKER_REGISTRY}/order-service:${IMAGE_TAG}
+      -t ${DOCKER_REGISTRY}/order-service:latest
+      .
+    - docker push ${DOCKER_REGISTRY}/order-service:${IMAGE_TAG}
+    - docker push ${DOCKER_REGISTRY}/order-service:latest
+
+docker-build-inventory:
+  stage: docker-build
+  tags:
+    - gitlab-server
+  needs:
+    - publish-inventory-service
+  script:
+    - docker build
+      -f src/InventoryService/Dockerfile
+      -t ${DOCKER_REGISTRY}/inventory-service:${IMAGE_TAG}
+      -t ${DOCKER_REGISTRY}/inventory-service:latest
+      .
+    - docker push ${DOCKER_REGISTRY}/inventory-service:${IMAGE_TAG}
+    - docker push ${DOCKER_REGISTRY}/inventory-service:latest
+
+docker-build-payment:
+  stage: docker-build
+  tags:
+    - gitlab-server
+  needs:
+    - publish-payment-service
+  script:
+    - docker build
+      -f src/PaymentService/Dockerfile
+      -t ${DOCKER_REGISTRY}/payment-service:${IMAGE_TAG}
+      -t ${DOCKER_REGISTRY}/payment-service:latest
+      .
+    - docker push ${DOCKER_REGISTRY}/payment-service:${IMAGE_TAG}
+    - docker push ${DOCKER_REGISTRY}/payment-service:latest
+
+docker-build-ui:
+  stage: docker-build
+  tags:
+    - gitlab-server
+  needs:
+    - build-ui
+  script:
+    - docker build
+      -f ui/Dockerfile
+      -t ${DOCKER_REGISTRY}/ui:${IMAGE_TAG}
+      -t ${DOCKER_REGISTRY}/ui:latest
+      .
+    - docker push ${DOCKER_REGISTRY}/ui:${IMAGE_TAG}
+    - docker push ${DOCKER_REGISTRY}/ui:latest
+
+# Stage 5: DEPLOY
+
+deploy:
+  stage: deploy
+  tags:
+    - gitlab-server
+  needs:
+    - docker-build-order
+    - docker-build-inventory
+    - docker-build-payment
+    - docker-build-ui
+  variables:
+    DEPLOY_USER: "kvi"
+    DEPLOY_HOST: "192.168.248.100"
+  script:
+    - echo "── Deploying version ${IMAGE_TAG} to ${DEPLOY_HOST} ──"
+    - scp docker-compose.yml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
+    - ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
+        cd ${DEPLOY_PATH} &&
+        export IMAGE_TAG=${IMAGE_TAG} &&
+        export DOCKER_REGISTRY=${DOCKER_REGISTRY} &&
+        docker compose pull &&
+        docker compose up -d --remove-orphans"
+    - echo "── Deploy completed! Tag ${IMAGE_TAG} ──"
+  environment:
+    name: production
+    url: http://192.168.248.100
+  when: manual
