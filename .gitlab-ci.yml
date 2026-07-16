@@ -19,30 +19,29 @@ stages:
   - docker-build
   - deploy
 
-# Stage 1: BUILD
-
-.fix-permissions: &fix-permissions
-  - docker run --rm -v "$PWD":/w -w /w alpine chown -R $(id -u):$(id -g) . || true
-
-build-dotnet:
-  stage: build
+# Global: run before/after every job to keep workspace runner-owned
+default:
   tags:
     - gitlab-server
   before_script:
-    - *fix-permissions
+    - docker run --rm -v "$PWD":/w -w /w alpine chown -R $(id -u):$(id -g) . 2>/dev/null || true
+  after_script:
+    - docker run --rm -v "$CI_PROJECT_DIR":/w -w /w alpine chown -R $(id -u):$(id -g) . 2>/dev/null || true
+
+# Stage 1: BUILD
+
+build-dotnet:
+  stage: build
   script:
     - docker run --rm --network host
       --user "$(id -u):$(id -g)"
       -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -e XDG_DATA_HOME=/tmp
+      -e NUGET_PACKAGES=/tmp/nuget
       -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
       sh -c "dotnet restore MicroserviceDemo.slnx && dotnet build MicroserviceDemo.slnx -c Release --no-restore"
 
 build-ui:
   stage: build
-  tags:
-    - gitlab-server
-  before_script:
-    - *fix-permissions
   script:
     - docker run --rm --network host
       --user "$(id -u):$(id -g)" -e HOME=/tmp
@@ -57,16 +56,13 @@ build-ui:
 
 test-dotnet:
   stage: test
-  tags:
-    - gitlab-server
   needs:
     - build-dotnet
-  before_script:
-    - *fix-permissions
   script:
     - docker run --rm --network host
       --user "$(id -u):$(id -g)"
       -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -e XDG_DATA_HOME=/tmp
+      -e NUGET_PACKAGES=/tmp/nuget
       -v "$PWD":/src -w /src $DOTNET_SDK_IMAGE
       dotnet test MicroserviceDemo.slnx -c Release --verbosity normal || true
   allow_failure: true
