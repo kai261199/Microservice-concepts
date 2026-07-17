@@ -7,7 +7,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api/orders': 'http://localhost:5001',
-      '/api/payments': 'http://localhost:5002',
+      '/api/payments': 'http://localhost:5036',
       '/api/inventory': 'http://localhost:5003',
     },
   },

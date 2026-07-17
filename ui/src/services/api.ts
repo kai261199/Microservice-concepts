@@ -7,9 +7,9 @@ import {
   StockReservation,
 } from '../types';
 
-const ORDER_API = 'http://localhost:5001';
-const PAYMENT_API = 'http://localhost:5036';
-const INVENTORY_API = 'http://localhost:5003';
+const ORDER_API = '';
+const PAYMENT_API = '';
+const INVENTORY_API = '';
 
 export async function createOrder(request: CreateOrderRequest): Promise<CreateOrderResult> {
   const res = await fetch(`${ORDER_API}/api/orders`, {

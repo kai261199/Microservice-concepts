@@ -22,6 +22,8 @@ stages:
 default:
   tags:
     - gitlab-server
+  after_script:
+    - docker run --rm -v "$CI_PROJECT_DIR":/w alpine chown -R "$(id -u):$(id -g)" /w 2>/dev/null || true
 
 # Stage 1: BUILD
 
@@ -119,20 +121,13 @@ deploy:
     - docker-build-inventory
     - docker-build-payment
     - docker-build-ui
-  variables:
-    DEPLOY_USER: "kvi"
-    DEPLOY_HOST: "192.168.248.100"
   script:
-    - echo "── Deploying version ${IMAGE_TAG} to ${DEPLOY_HOST} ──"
-    - scp docker-compose.yml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
-    - ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
-        cd ${DEPLOY_PATH} &&
-        export IMAGE_TAG=${IMAGE_TAG} &&
-        export DOCKER_REGISTRY=${DOCKER_REGISTRY} &&
-        docker compose pull &&
-        docker compose up -d --remove-orphans"
-    - echo "── Deploy completed! Tag ${IMAGE_TAG} ──"
+    - echo "── Deploying version ${IMAGE_TAG} locally ──"
+    - export IMAGE_TAG=${IMAGE_TAG}
+    - export DOCKER_REGISTRY=${DOCKER_REGISTRY}
+    - docker compose -f docker-compose.yml up -d --remove-orphans
+    - echo "── Deploy completed! Access at http://kvi.microservice.tech ──"
   environment:
     name: production
-    url: http://192.168.248.100
+    url: http://kvi.microservice.tech
   when: manual
