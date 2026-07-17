@@ -125,7 +125,7 @@ deploy:
     - echo "── Deploying version ${IMAGE_TAG} locally ──"
     - export IMAGE_TAG=${IMAGE_TAG}
     - export DOCKER_REGISTRY=${DOCKER_REGISTRY}
-    - docker compose -f docker-compose.yml up -d --remove-orphans
+    - docker-compose -f docker-compose.yml up -d --remove-orphans
     - echo "── Deploy completed! Access at http://kvi.microservice.tech ──"
   environment:
     name: production

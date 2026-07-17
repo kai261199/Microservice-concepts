@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.3'
 
 # Docker Compose for full stack:
 # - RabbitMQ, SQL Server (infrastructure)
@@ -47,6 +47,7 @@ services:
       - "5001:8080"
     environment:
       ASPNETCORE_URLS: "http://+:8080"
+      Kestrel__Endpoints__Http__Url: "http://+:8080"
       ASPNETCORE_ENVIRONMENT: "Production"
       ConnectionStrings__OrderDb: "Server=sqlserver,1433;Database=OrderDb;User Id=sa;Password=YourStr0ngP@ssword!;TrustServerCertificate=true"
       RabbitMq__Host: "rabbitmq"
@@ -67,6 +68,7 @@ services:
       - "5003:8080"
     environment:
       ASPNETCORE_URLS: "http://+:8080"
+      Kestrel__Endpoints__Http__Url: "http://+:8080"
       ASPNETCORE_ENVIRONMENT: "Production"
       ConnectionStrings__InventoryDb: "Server=sqlserver,1433;Database=InventoryDb;User Id=sa;Password=YourStr0ngP@ssword!;TrustServerCertificate=true"
       RabbitMq__Host: "rabbitmq"
@@ -87,6 +89,7 @@ services:
       - "5036:8080"
     environment:
       ASPNETCORE_URLS: "http://+:8080"
+      Kestrel__Endpoints__Http__Url: "http://+:8080"
       ASPNETCORE_ENVIRONMENT: "Production"
       ConnectionStrings__PaymentDb: "Server=sqlserver,1433;Database=PaymentDb;User Id=sa;Password=YourStr0ngP@ssword!;TrustServerCertificate=true"
       RabbitMq__Host: "rabbitmq"
