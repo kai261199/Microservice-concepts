@@ -105,7 +105,7 @@ services:
       - inventory-service
       - payment-service
     ports:
-      - "8080:80"
+      - "9080:80"
     networks:
       - microservice-net
     restart: unless-stopped
